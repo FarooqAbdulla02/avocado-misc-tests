@@ -171,6 +171,30 @@ class TcpdumpTest(Test):
             cmd = "nping --%s %s -c %s" % (param, self.peer_ip, nping_count)
             return process.SubProcess(cmd, verbose=False, shell=True)
 
+    # def tearDown(self):
+    #     '''
+    #     unset ip for host interface
+    #     '''
+    #     if self.networkinterface:
+    #         if self.networkinterface.set_mtu('1500', timeout=self.mtu_timeout) is not None:
+    #             self.cancel("Failed to set mtu in host")
+    #         try:
+    #             self.peer_networkinterface.set_mtu(
+    #                 '1500', timeout=self.mtu_timeout)
+    #         except Exception:
+    #             self.peer_public_networkinterface.set_mtu(
+    #                 '1500', timeout=self.mtu_timeout)
+    #         self.networkinterface.remove_ipaddr(self.ipaddr, self.netmask)
+    #         try:
+    #             self.networkinterface.restore_from_backup()
+    #         except Exception:
+    #             self.networkinterface.remove_cfg_file()
+    #             self.log.info(
+    #                 "backup file not available, could not restore file.")
+    #         self.remotehost.remote_session.quit()
+    #         if hasattr(self, 'remotehost_public'):
+            self.remotehost_public.remote_session.quit()
+
     def tearDown(self):
         '''
         unset ip for host interface
@@ -192,4 +216,5 @@ class TcpdumpTest(Test):
                 self.log.info(
                     "backup file not available, could not restore file.")
             self.remotehost.remote_session.quit()
-            self.remotehost_public.remote_session.quit()
+            if hasattr(self, 'remotehost_public'):
+                self.remotehost_public.remote_session.quit()
