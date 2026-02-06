@@ -171,6 +171,7 @@ class TcpdumpTest(Test):
             cmd = "nping --%s %s -c %s" % (param, self.peer_ip, nping_count)
             return process.SubProcess(cmd, verbose=False, shell=True)
 
+
     def tearDown(self):
         '''
         unset ip for host interface
@@ -192,4 +193,5 @@ class TcpdumpTest(Test):
                 self.log.info(
                     "backup file not available, could not restore file.")
             self.remotehost.remote_session.quit()
-            self.remotehost_public.remote_session.quit()
+            if hasattr(self, 'remotehost_public'):
+                self.remotehost_public.remote_session.quit()
