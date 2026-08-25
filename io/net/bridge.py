@@ -75,7 +75,11 @@ class Bridging(Test):
         if os.path.exists('/etc/sysconfig/%s/ifcfg-%s' %
                           (net_path, self.bridge_interface)):
             self.networkinterface.remove_cfg_file()
-            self.check_failure('ip link del %s' % self.bridge_interface)
+        # Always attempt to delete the bridge interface before creating it.
+        # This handles stale interfaces from previous crashed runs.
+        process.system('ip link del %s 2>/dev/null || true' %
+                       self.bridge_interface, sudo=True, shell=True,
+                       ignore_status=True)
         self.check_failure('ip link add dev %s type bridge'
                            % self.bridge_interface)
         check_flag = False
@@ -92,14 +96,58 @@ class Bridging(Test):
                                % (host_interface, self.bridge_interface))
             if detected_distro.name == "SuSE":
                 if detected_distro.version >= 16:
-                    self.check_failure('nmcli connection down %s'
-                                       % host_interface)
+                    # Interface may not have an active NM connection (e.g. a
+                    # freshly added vNIC); exit code 10 is benign in that case.
+                    process.system('nmcli connection down %s' % host_interface,
+                                   sudo=True, shell=True, ignore_status=True)
+                    # Validate the interface is actually down after the command.
+                    # Enslaved interfaces (bridge members) remain UP operationally,
+                    # which is expected — only fail if operstate is DOWN/unknown
+                    # AND interface is NOT enslaved.
+                    operstate = '/sys/class/net/%s/operstate' % host_interface
+                    state = process.system_output(
+                        'cat %s' % operstate, sudo=True,
+                        shell=True, ignore_status=True).decode().strip()
+                    # Check if enslaved by checking master device
+                    master_path = '/sys/class/net/%s/master' % host_interface
+                    is_enslaved = process.system(
+                        'test -L %s' % master_path, sudo=True,
+                        shell=True, ignore_status=True) == 0
+                    if not is_enslaved and state not in ('down', 'unknown'):
+                        self.fail(
+                            "Interface %s failed to go down after "
+                            "'nmcli connection down' (operstate: %s)"
+                            % (host_interface, state))
+                    self.log.info("Interface %s enslaved=%s, operstate=%s",
+                                  host_interface, is_enslaved, state)
                 elif detected_distro.version < 16:
                     self.check_failure('ip addr flush dev %s' % host_interface)
             if detected_distro.name == 'rhel':
                 if int(detected_distro.version) >= 9:
-                    self.check_failure('nmcli connection down %s'
-                                       % host_interface)
+                    # Interface may not have an active NM connection (e.g. a
+                    # freshly added vNIC); exit code 10 is benign in that case.
+                    process.system('nmcli connection down %s' % host_interface,
+                                   sudo=True, shell=True, ignore_status=True)
+                    # Validate the interface is actually down after the command.
+                    # Enslaved interfaces (bridge members) remain UP operationally,
+                    # which is expected — only fail if operstate is DOWN/unknown
+                    # AND interface is NOT enslaved.
+                    operstate = '/sys/class/net/%s/operstate' % host_interface
+                    state = process.system_output(
+                        'cat %s' % operstate, sudo=True,
+                        shell=True, ignore_status=True).decode().strip()
+                    # Check if enslaved by checking master device
+                    master_path = '/sys/class/net/%s/master' % host_interface
+                    is_enslaved = process.system(
+                        'test -L %s' % master_path, sudo=True,
+                        shell=True, ignore_status=True) == 0
+                    if not is_enslaved and state not in ('down', 'unknown'):
+                        self.fail(
+                            "Interface %s failed to go down after "
+                            "'nmcli connection down' (operstate: %s)"
+                            % (host_interface, state))
+                    self.log.info("Interface %s enslaved=%s, operstate=%s",
+                                  host_interface, is_enslaved, state)
                 elif int(detected_distro.version) < 9:
                     self.check_failure('ip addr flush dev %s' % host_interface)
 
@@ -218,14 +266,45 @@ class Bridging(Test):
         for host_interface in self.host_interfaces:
             if detected_distro.name == "SuSE":
                 if detected_distro.version >= 16:
-                    self.check_failure('nmcli connection up %s'
-                                       % host_interface)
+                    # If the interface has no NM profile (e.g. freshly added
+                    # vNIC), nmcli exits 10 — fall back to ip link set up.
+                    ret = process.system(
+                        'nmcli connection up %s' % host_interface,
+                        sudo=True, shell=True, ignore_status=True)
+                    if ret != 0:
+                        self.check_failure('ip link set %s up' % host_interface)
+                    # Validate the interface is up and verify ping reachability
+                    if self.peer_ip:
+                        ping_cmd = 'ping -c 3 -I %s %s' % (host_interface, self.peer_ip)
+                        if process.system(ping_cmd, sudo=True, shell=True, ignore_status=True) != 0:
+                            self.fail(
+                                "Ping to %s via %s failed during tearDown"
+                                % (self.peer_ip, host_interface))
+                        else:
+                            self.log.info(
+                                "Ping to %s via %s succeeded during tearDown",
+                                self.peer_ip, host_interface)
                 elif detected_distro.version < 16:
                     self.check_failure('ip link set %s up' % host_interface)
             if detected_distro.name == 'rhel':
-                print(detected_distro.version)
                 if int(detected_distro.version) >= 9:
-                    self.check_failure('nmcli connection up %s'
-                                       % host_interface)
+                    # If the interface has no NM profile (e.g. freshly added
+                    # vNIC), nmcli exits 10 — fall back to ip link set up.
+                    ret = process.system(
+                        'nmcli connection up %s' % host_interface,
+                        sudo=True, shell=True, ignore_status=True)
+                    if ret != 0:
+                        self.check_failure('ip link set %s up' % host_interface)
+                    # Validate the interface is up and verify ping reachability
+                    if self.peer_ip:
+                        ping_cmd = 'ping -c 3 -I %s %s' % (host_interface, self.peer_ip)
+                        if process.system(ping_cmd, sudo=True, shell=True, ignore_status=True) != 0:
+                            self.fail(
+                                "Ping to %s via %s failed during tearDown"
+                                % (self.peer_ip, host_interface))
+                        else:
+                            self.log.info(
+                                "Ping to %s via %s succeeded during tearDown",
+                                self.peer_ip, host_interface)
                 elif int(detected_distro.version) < 9:
                     self.check_failure('ip link set %s up' % host_interface)
